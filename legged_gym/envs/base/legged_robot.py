@@ -86,7 +86,7 @@ class LeggedRobot(BaseTask):
         self.actions = torch.clip(actions, -clip_actions, clip_actions).to(self.device)
         # step physics and render each frame
         self.render()
-        for _ in range(self.cfg.control.decimation):
+        for _ in range(self.cfg.control.decimation): # 代码在每个策略时间步内进行decimation次物理仿真步骤
             self.torques = self._compute_torques(self.actions).view(self.torques.shape)
             self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.torques))
             self.gym.simulate(self.sim)
@@ -102,7 +102,7 @@ class LeggedRobot(BaseTask):
             self.privileged_obs_buf = torch.clip(self.privileged_obs_buf, -clip_obs, clip_obs)
         return self.obs_buf, self.privileged_obs_buf, self.rew_buf, self.reset_buf, self.extras
 
-    def post_physics_step(self):
+    def post_physics_step(self): # 计算奖励，观测，重置等
         """ check terminations, compute observations and rewards
             calls self._post_physics_step_callback() for common computations 
             calls self._draw_debug_vis() if needed
@@ -110,7 +110,7 @@ class LeggedRobot(BaseTask):
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
 
-        self.episode_length_buf += 1
+        self.episode_length_buf += 1 # 机器人经过了多少个step
         self.common_step_counter += 1
 
         # prepare quantities
@@ -206,7 +206,7 @@ class LeggedRobot(BaseTask):
             self.rew_buf += rew
             self.episode_sums["termination"] += rew
     
-    def compute_observations(self):
+    def compute_observations(self): # 计算观测，如果观测改了也需要调整
         """ Computes observations
         """
         self.obs_buf = torch.cat((  self.base_lin_vel * self.obs_scales.lin_vel,
@@ -317,7 +317,7 @@ class LeggedRobot(BaseTask):
             props[0].mass += np.random.uniform(rng[0], rng[1])
         return props
     
-    def _post_physics_step_callback(self):
+    def _post_physics_step_callback(self): # heading指令，测量地形高度，随机推动机器人
         """ Callback called before computing terminations, rewards, and observations
             Default behaviour: Compute ang vel command based on target and heading, compute measured terrain heights and randomly push robots
         """
@@ -334,7 +334,7 @@ class LeggedRobot(BaseTask):
         if self.cfg.domain_rand.push_robots and  (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
             self._push_robots()
 
-    def _resample_commands(self, env_ids):
+    def _resample_commands(self, env_ids): # 指令变了这里也要改
         """ Randommly select commands of some environments
 
         Args:
@@ -350,7 +350,7 @@ class LeggedRobot(BaseTask):
         # set small commands to zero
         self.commands[env_ids, :2] *= (torch.norm(self.commands[env_ids, :2], dim=1) > 0.2).unsqueeze(1)
 
-    def _compute_torques(self, actions):
+    def _compute_torques(self, actions): # action是给定PD控制器的关节位置或者速度，要看是P控制还是V控制，默认是位置控制
         """ Compute torques from actions.
             Actions can be interpreted as position or velocity targets given to a PD controller, or directly as scaled torques.
             [NOTE]: torques must have the same dimension as the number of DOFs, even if some DOFs are not actuated.
@@ -411,7 +411,7 @@ class LeggedRobot(BaseTask):
                                                      gymtorch.unwrap_tensor(self.root_states),
                                                      gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
 
-    def _push_robots(self):
+    def _push_robots(self): # 随机基座速度来模拟推动冲量
         """ Random pushes the robots. Emulates an impulse by setting a randomized base velocity. 
         """
         max_vel = self.cfg.domain_rand.max_push_vel_xy
@@ -440,7 +440,7 @@ class LeggedRobot(BaseTask):
                                                    torch.clip(self.terrain_levels[env_ids], 0)) # (the minumum level is zero)
         self.env_origins[env_ids] = self.terrain_origins[self.terrain_levels[env_ids], self.terrain_types[env_ids]]
     
-    def update_command_curriculum(self, env_ids):
+    def update_command_curriculum(self, env_ids): # 调整训练指令的难度上下限，这里只调整了x方向线速度
         """ Implements a curriculum of increasing commands
 
         Args:
@@ -452,7 +452,7 @@ class LeggedRobot(BaseTask):
             self.command_ranges["lin_vel_x"][1] = np.clip(self.command_ranges["lin_vel_x"][1] + 0.5, 0., self.cfg.commands.max_curriculum)
 
 
-    def _get_noise_scale_vec(self, cfg):
+    def _get_noise_scale_vec(self, cfg): # 加噪声，如果观测改变的话要及时调整
         """ Sets a vector used to scale the noise added to the observations.
             [NOTE]: Must be adapted when changing the observations structure
 
@@ -478,7 +478,7 @@ class LeggedRobot(BaseTask):
         return noise_vec
 
     #----------------------------------------
-    def _init_buffers(self):
+    def _init_buffers(self): # 二次开发添加的变量需要在这里初始化
         """ Initialize torch tensors which will contain simulation states and processed quantities
         """
         # get gym GPU state tensors
@@ -758,7 +758,7 @@ class LeggedRobot(BaseTask):
                 sphere_pose = gymapi.Transform(gymapi.Vec3(x, y, z), r=None)
                 gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[i], sphere_pose) 
 
-    def _init_height_points(self):
+    def _init_height_points(self): # 存入measured_points，agent附近创建高程图，见legged_robot_config.py
         """ Returns points at which the height measurments are sampled (in base frame)
 
         Returns:
@@ -774,7 +774,7 @@ class LeggedRobot(BaseTask):
         points[:, :, 1] = grid_y.flatten()
         return points
 
-    def _get_heights(self, env_ids=None):
+    def _get_heights(self, env_ids=None): # 获取各agent当前位置的高程(子地形存在时)
         """ Samples heights of the terrain at required points around each robot.
             The points are offset by the base's position and rotated by the base's yaw
 
@@ -879,7 +879,7 @@ class LeggedRobot(BaseTask):
         ang_vel_error = torch.square(self.commands[:, 2] - self.base_ang_vel[:, 2])
         return torch.exp(-ang_vel_error/self.cfg.rewards.tracking_sigma)
 
-    def _reward_feet_air_time(self):
+    def _reward_feet_air_time(self): # 触地检测
         # Reward long steps
         # Need to filter the contacts because the contact reporting of PhysX is unreliable on meshes
         contact = self.contact_forces[:, self.feet_indices, 2] > 1.
@@ -897,7 +897,7 @@ class LeggedRobot(BaseTask):
         return torch.any(torch.norm(self.contact_forces[:, self.feet_indices, :2], dim=2) >\
              5 *torch.abs(self.contact_forces[:, self.feet_indices, 2]), dim=1)
         
-    def _reward_stand_still(self):
+    def _reward_stand_still(self): # 当前关节角与默认关节角差的绝对值
         # Penalize motion at zero commands
         return torch.sum(torch.abs(self.dof_pos - self.default_dof_pos), dim=1) * (torch.norm(self.commands[:, :2], dim=1) < 0.1)
 

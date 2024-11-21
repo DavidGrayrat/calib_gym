@@ -41,13 +41,13 @@ class Terrain:
         self.cfg = cfg
         self.num_robots = num_robots
         self.type = cfg.mesh_type
-        if self.type in ["none", 'plane']:
+        if self.type in ["none", 'plane']: # 如果设置平地或者无地形，直接返回
             return
         self.env_length = cfg.terrain_length
         self.env_width = cfg.terrain_width
         self.proportions = [np.sum(cfg.terrain_proportions[:i+1]) for i in range(len(cfg.terrain_proportions))]
 
-        self.cfg.num_sub_terrains = cfg.num_rows * cfg.num_cols
+        self.cfg.num_sub_terrains = cfg.num_rows * cfg.num_cols # 行、列指的是子地形的数量
         self.env_origins = np.zeros((cfg.num_rows, cfg.num_cols, 3))
 
         self.width_per_env_pixels = int(self.env_width / cfg.horizontal_scale)
@@ -58,11 +58,11 @@ class Terrain:
         self.tot_rows = int(cfg.num_rows * self.length_per_env_pixels) + 2 * self.border
 
         self.height_field_raw = np.zeros((self.tot_rows , self.tot_cols), dtype=np.int16)
-        if cfg.curriculum:
+        if cfg.curriculum: # 课程式生成子地形
             self.curiculum()
-        elif cfg.selected:
+        elif cfg.selected: # 指定式生成子地形
             self.selected_terrain()
-        else:    
+        else:    # 随机式生成子地形
             self.randomized_terrain()   
         
         self.heightsamples = self.height_field_raw
@@ -72,7 +72,7 @@ class Terrain:
                                                                                             self.cfg.vertical_scale,
                                                                                             self.cfg.slope_treshold)
     
-    def randomized_terrain(self):
+    def randomized_terrain(self): # 每个子地形的类型和难度都是随机的
         for k in range(self.cfg.num_sub_terrains):
             # Env coordinates in the world
             (i, j) = np.unravel_index(k, (self.cfg.num_rows, self.cfg.num_cols))
@@ -135,7 +135,7 @@ class Terrain:
             rectangle_min_size = 1.
             rectangle_max_size = 2.
             terrain_utils.discrete_obstacles_terrain(terrain, discrete_obstacles_height, rectangle_min_size, rectangle_max_size, num_rectangles, platform_size=3.)
-        elif choice < self.proportions[5]:
+        elif choice < self.proportions[5]: # 默认只有五种子地形，所以要出现stepping_stones_terrain，需要修改legged_robot_config.py
             terrain_utils.stepping_stones_terrain(terrain, stone_size=stepping_stones_size, stone_distance=stone_distance, max_height=0., platform_size=4.)
         elif choice < self.proportions[6]:
             gap_terrain(terrain, gap_size=gap_size, platform_size=3.)
