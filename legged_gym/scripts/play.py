@@ -38,6 +38,7 @@ from legged_gym.utils import  get_args, export_policy_as_jit, task_registry, Log
 import numpy as np
 import torch
 
+## python play.py --experiment_name='rough_go2' --load_run='walk_stair' --checkpoint=1500
 
 def play(args):
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
