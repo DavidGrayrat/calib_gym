@@ -38,14 +38,25 @@ from legged_gym.utils import  get_args, export_policy_as_jit, task_registry, Log
 import numpy as np
 import torch
 
+## debug调试
+# import debugpy
+# try:
+#     # 5678 is the default attach port in the VS Code debug configurations. Unless a host and port are specified, host defaults to 127.0.0.1
+#     debugpy.listen(("localhost", 9501))
+#     print("Waiting for debugger attach")
+#     debugpy.wait_for_client()
+# except Exception as e:
+#     pass
+## debug调试
+
 ## python play.py --experiment_name='rough_go2' --load_run='walk_stair' --checkpoint=1500
 
 def play(args):
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     # override some parameters for testing
-    env_cfg.env.num_envs = min(env_cfg.env.num_envs, 50)
+    env_cfg.env.num_envs = min(env_cfg.env.num_envs, 8)
     env_cfg.terrain.num_rows = 5
-    env_cfg.terrain.num_cols = 5
+    env_cfg.terrain.num_cols = 1
     env_cfg.terrain.curriculum = False
     env_cfg.noise.add_noise = False
     env_cfg.domain_rand.randomize_friction = False
@@ -75,14 +86,21 @@ def play(args):
     camera_direction = np.array(env_cfg.viewer.lookat) - np.array(env_cfg.viewer.pos)
     img_idx = 0
 
-    for i in range(10*int(env.max_episode_length)):
+    for i in range(100*int(env.max_episode_length)):
         actions = policy(obs.detach())
         obs, _, rews, dones, infos = env.step(actions.detach())
         if RECORD_FRAMES:
             if i % 2:
-                filename = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name, 'exported', 'frames', f"{img_idx}.png")
-                env.gym.write_viewer_image_to_file(env.viewer, filename)
-                img_idx += 1 
+                directory = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name, 'exported', 'frames')
+                if not os.path.exists(directory):
+                    os.makedirs(directory)
+                filename = os.path.join(directory, f"{img_idx}.png")
+                try:
+                    env.gym.write_viewer_image_to_file(env.viewer, filename)
+                    print(f"Saved frame to {filename}")
+                    img_idx += 1
+                except Exception as e:
+                    print(f"Failed to save frame: {e}")
         if MOVE_CAMERA:
             camera_position += camera_vel * env.dt
             env.set_camera(camera_position, camera_position + camera_direction)
@@ -116,7 +134,7 @@ def play(args):
 
 if __name__ == '__main__':
     EXPORT_POLICY = True
-    RECORD_FRAMES = False
+    RECORD_FRAMES = True
     MOVE_CAMERA = False
     args = get_args()
     play(args)

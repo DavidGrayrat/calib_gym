@@ -45,8 +45,11 @@ class A1RoughCfg( LeggedRobotCfg ):
             'RR_thigh_joint': 1.,   # [rad]
 
             'FL_calf_joint': -1.5,   # [rad]
+            # 'FL_calf_joint': -2.2,   # [rad]
             'RL_calf_joint': -1.5,    # [rad]
+            # 'RL_calf_joint': -2.5,    # [rad]
             'FR_calf_joint': -1.5,  # [rad]
+            # 'FR_calf_joint': -2.0,  # [rad]
             'RR_calf_joint': -1.5,    # [rad]
         }
 

@@ -34,8 +34,8 @@ class LeggedRobotCfg(BaseConfig):
     class env:
         # num_envs = 4096
         num_envs = 1024
-        # num_observations = 235
-        num_observations = 48
+        # num_observations = 236
+        num_observations = 49
         # privileged observation是指特权观察，是指训练时有但测试时没有的观察值
         num_privileged_obs = None # if not None a priviledge_obs_buf will be returned by step() (critic obs for assymetric training). None is returned otherwise 
         num_actions = 12
@@ -48,7 +48,7 @@ class LeggedRobotCfg(BaseConfig):
         horizontal_scale = 0.1 # [m]
         vertical_scale = 0.005 # [m]
         border_size = 5 # [m] 额外的地形边界宽度(正方形框)，用于避免agent在边界处出现问题
-        curriculum = True
+        curriculum = True # 地形课程
         static_friction = 1.0 # 静摩擦
         dynamic_friction = 1.0 # 动摩擦
         restitution = 0. # 恢复系数，0表示没有弹性?
@@ -63,8 +63,8 @@ class LeggedRobotCfg(BaseConfig):
         terrain_width = 5. # 一个子地形的宽度
         # num_rows= 10 # number of terrain rows (levels)
         # num_cols = 20 # number of terrain cols (types)
-        num_rows = 8
-        num_cols = 8
+        num_rows = 5
+        num_cols = 5
         # terrain types: [smooth slope, rough slope, stairs up, stairs down, discrete]
         terrain_proportions = [0.1, 0.1, 0.35, 0.25, 0.2]
         ## terrain_proportions = [0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.1]
@@ -72,11 +72,11 @@ class LeggedRobotCfg(BaseConfig):
         slope_treshold = 0.75 # slopes above this threshold will be corrected to vertical surfaces
 
     class commands:
-        curriculum = False
+        curriculum = False # 指令课程
         max_curriculum = 1.
         # num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
         num_commands = 5 # 抬哪一只脚，
-        resampling_time = 10. # time before command are changed[s]
+        resampling_time = 6. # time before command are changed[s]
         heading_command = True # if true: compute ang vel command from heading error
         class ranges:
             # lin_vel_x = [-1.0, 1.0] # min max [m/s]
@@ -87,8 +87,9 @@ class LeggedRobotCfg(BaseConfig):
             lin_vel_y = [0, 0]   # min max [m/s]
             ang_vel_yaw = [0, 0]    # min max [rad/s]
             heading = [0, 0]
-            
-            foot_lifted = [0, 1, 2, 3] # 0:右前，1:左前，2:右后，3:左后
+            # 抬腿奖励
+            # foot_to_lift = [0, 1, 2, 3] # 0:左前，1:右前，2:左后，3:右后
+            foot_to_lift = [0, 1, 2, 3]
 
     class init_state:
         pos = [0.0, 0.0, 1.] # x,y,z [m]
@@ -136,13 +137,14 @@ class LeggedRobotCfg(BaseConfig):
         friction_range = [0.5, 1.25]
         randomize_base_mass = False
         added_mass_range = [-1., 1.]
-        push_robots = True # 定期给机器人加一个随机速度扰动
+        push_robots = False # 定期给机器人加一个随机速度扰动
         push_interval_s = 15
         max_push_vel_xy = 1.
 
-    class rewards: # 在这里加奖励系数，然后去legged_robot_env.py加奖励函数
+    class rewards: # 在这里加奖励系数，然后去legged_robot.py加奖励函数
         class scales:
-            termination = -0.0
+            # termination = -0
+            termination = -100
             tracking_lin_vel = 1.0
             tracking_ang_vel = 0.5
             lin_vel_z = -2.0
@@ -153,23 +155,46 @@ class LeggedRobotCfg(BaseConfig):
             dof_acc = -2.5e-7
             # base_height = -0. 
             base_height = -0.1
-            # feet_air_time =  1.0
+            # feet_air_time = 1.0
+            feet_air_time = 0
             collision = -1.
-            feet_stumble = -0.0 
+            feet_stumble = -0.0
             action_rate = -0.01
-            # stand_still = -0.
-            stand_still = -0.15
+            stand_still = -0.
+            # 抬脚奖励
+            foot_lifted = 0.5
+            # feet_slip = -0.
+            feet_slip = -0.5
+            calf_curve = -0.5
+            calf_move = 0.
 
             """
             仅注释与默认奖励项有区别的内容
             
-            站住
+            a1 stand
+            feet_slip = -0.5
             base_height = -0.1
-            feet_air_time =  0
-            stand_still = -0.1
+            stand_still = -0
+            feet_air_time = 0
+            foot_lifted = 0
+            """
+            """
 
-            站住抬一只脚
-            
+            a1 tripod
+            feet_slip = -0.5
+            base_height = -0.1
+            stand_still = -0
+            feet_air_time = 0
+            foot_lifted = 0.5
+            calf_curve = -0.5
+
+            go2 tripod
+            feet_slip = -0.5
+            base_height = -0.1
+            stand_still = -0
+            feet_air_time = 0
+            foot_lifted = 0.5
+            calf_curve = -0.5
             """
 
         only_positive_rewards = True # if true negative total rewards are clipped at zero (avoids early termination problems)
@@ -191,7 +216,7 @@ class LeggedRobotCfg(BaseConfig):
         clip_actions = 100.
 
     class noise:
-        add_noise = True
+        add_noise = False
         noise_level = 1.0 # scales other values 
         class noise_scales:
             dof_pos = 0.01
