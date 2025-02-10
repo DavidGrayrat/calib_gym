@@ -49,7 +49,7 @@ import torch
 #     pass
 ## debug调试
 
-## python play.py --experiment_name='rough_go2' --load_run='walk_stair' --checkpoint=1500
+## python play.py --task=go2 --experiment_name=go2calib_phased  --num_envs=8 --run_name=
 
 def play(args):
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
@@ -88,10 +88,11 @@ def play(args):
 
     for i in range(100*int(env.max_episode_length)):
         actions = policy(obs.detach())
+        print(f"time: {i*env.dt}")
         obs, _, rews, dones, infos = env.step(actions.detach())
         if RECORD_FRAMES:
             if i % 2:
-                directory = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name, 'exported', 'frames')
+                directory = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name, train_cfg.runner.run_name, 'frames')
                 if not os.path.exists(directory):
                     os.makedirs(directory)
                 filename = os.path.join(directory, f"{img_idx}.png")
@@ -134,7 +135,7 @@ def play(args):
 
 if __name__ == '__main__':
     EXPORT_POLICY = True
-    RECORD_FRAMES = True
+    RECORD_FRAMES = False
     MOVE_CAMERA = False
     args = get_args()
     play(args)

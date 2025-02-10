@@ -32,6 +32,7 @@ from legged_gym import LEGGED_GYM_ROOT_DIR, envs
 from time import time
 from warnings import WarningMessage
 import numpy as np
+from datetime import datetime
 import os
 
 from isaacgym.torch_utils import *
@@ -74,6 +75,7 @@ class LeggedRobot(BaseTask):
             self.set_camera(self.cfg.viewer.pos, self.cfg.viewer.lookat)
         self._init_buffers()
         self._prepare_reward_function()
+        self._create_trajectory()
         self.init_done = True
 
     def step(self, actions):
@@ -87,12 +89,14 @@ class LeggedRobot(BaseTask):
         # step physics and render each frame
         self.render()
         for _ in range(self.cfg.control.decimation): # 代码在每个策略时间步内进行decimation次物理仿真步骤
-            self.torques = self._compute_torques(self.actions).view(self.torques.shape)
-            self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.torques))
-            self.gym.simulate(self.sim)
+            self.calibration_train()
+            self.torques = self._compute_torques(self.actions).view(self.torques.shape) # 网络给出action，用action计算torque
+            self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.torques)) # 把torque施加到envs上
+            self.gym.simulate(self.sim) # 进行一步物理仿真
             if self.device == 'cpu':
                 self.gym.fetch_results(self.sim, True)
-            self.gym.refresh_dof_state_tensor(self.sim)
+            self.gym.refresh_dof_state_tensor(self.sim) # 更新self.dof_state，包括关节角和关节角速度，1024(num_envs)*12(num_dof)
+        self.get_traj_cdn_txt()
         self.post_physics_step()
 
         # return clipped obs, clipped states (None), rewards, dones and infos
@@ -111,8 +115,8 @@ class LeggedRobot(BaseTask):
         self.gym.refresh_net_contact_force_tensor(self.sim)
         self.gym.refresh_rigid_body_state_tensor(self.sim)
 
-        self.episode_length_buf += 1 # 机器人经过了多少个step
-        self.common_step_counter += 1
+        self.episode_length_buf += 1 # 某个env经过了多少个step（若env重置则该数值也会重置）
+        self.common_step_counter += 1 # 所有env经过了多少个step，不会因某个env重置而重置
 
         # prepare quantities
         self.base_quat[:] = self.root_states[:, 3:7]
@@ -375,7 +379,7 @@ class LeggedRobot(BaseTask):
         actions_scaled = actions * self.cfg.control.action_scale
         control_type = self.cfg.control.control_type
         if control_type=="P":
-            torques = self.p_gains*(actions_scaled + self.default_dof_pos - self.dof_pos) - self.d_gains*self.dof_vel
+            torques = self.p_gains*(actions_scaled + self.default_dof_pos - self.dof_pos) - self.d_gains*self.dof_vel # original
         elif control_type=="V":
             torques = self.p_gains*(actions_scaled - self.dof_vel) - self.d_gains*(self.dof_vel - self.last_dof_vel)/self.sim_params.dt
         elif control_type=="T":
@@ -560,6 +564,7 @@ class LeggedRobot(BaseTask):
                 if self.cfg.control.control_type in ["P", "V"]:
                     print(f"PD gain of joint {name} were not defined, setting them to zero")
         self.default_dof_pos = self.default_dof_pos.unsqueeze(0)
+
 
     def _prepare_reward_function(self):
         """ Prepares a list of reward functions, whcih will be called to compute the total reward.
@@ -840,6 +845,10 @@ class LeggedRobot(BaseTask):
     def _reward_ang_vel_xy(self):
         # Penalize xy axes base angular velocity
         return torch.sum(torch.square(self.base_ang_vel[:, :2]), dim=1)
+
+    def _reward_ang_vel_all(self):
+        # Penalize all axes base angular velocity
+        return torch.sum(torch.square(self.base_ang_vel), dim=1)
     
     def _reward_orientation(self):
         # Penalize non flat base orientation
@@ -986,3 +995,175 @@ class LeggedRobot(BaseTask):
         self.last_curve = curve_pos
         rew_move = torch.sum(torch.square(self.last_curve - self.curve), dim=1)
         return rew_move
+
+    #------------ controller----------------
+    def _create_trajectory(self):
+        self.freq = 1 / self.dt
+        self.shift_range = 1
+        self.omega = np.pi * 0.25 / self.shift_range
+
+        # 动作cdn=1
+        # self.num_kw = 10
+        # self.kw_arange = torch.arange(1, self.num_kw + 1, device=self.device)
+        # self.kw_hip = torch.tensor(
+        #     [-0.092175204, 0.055156594, 0.228888365, 0.200556885, 0.350061213, 0.672317906, 
+        #     0.394845532, -0.482850929, -0.859851211, -0.419951884], device=self.device
+        # )
+        # self.kw_thigh = torch.tensor(
+        #     [0.680682733, 0.296941315, 0.263194088, 0.381940112, 0.293745207, 0.151310506, 
+        #     0.210632043, 0.212464916, -0.014183956, 0.151397236], device=self.device
+        # )
+        # self.kw_calf = torch.zeros(self.num_kw, device=self.device)
+
+        # 动作cdn=1但幅度更小，记得改sin cos顺序
+        self.num_kw = 3
+        self.kw_arange = torch.arange(1, self.num_kw + 1, device=self.device)
+        self.kw_hip = torch.tensor(
+            [-0.061545,-0.01863,1.4404], device=self.device
+        )
+        self.kw_thigh = torch.tensor(
+            [-0.89714,0.049513,0.44911], device=self.device
+        )
+        self.kw_calf = torch.zeros(self.num_kw, device=self.device)
+        
+        # 随便抬抬腿，晃一晃
+        # self.num_kw = 1 
+        # self.kw_arange = torch.arange(1, self.num_kw + 1, device=self.device)
+        # self.kw_hip = self.omega * 0.3
+        # self.kw_thigh = self.omega * -0.5
+        # self.kw_calf = self.omega * -0.5
+        
+        self.T_length = int(8 * self.shift_range / self.dt)
+        total_T_num = 3
+        # 创建时间步和每个kw_arange的矩阵
+        time_steps = torch.arange(0, self.T_length, device=self.device).unsqueeze(1)  # shape: (T_length, 1)
+        kw_matrix = self.kw_arange.unsqueeze(0) * time_steps * self.dt * self.omega  # shape: (T_length, num_kw)
+        
+        # 计算每个关节的轨迹变化
+        sin_kw_matrix = torch.sin(kw_matrix)  # shape: (T_length, num_kw)
+        cos_kw_matrix = torch.cos(kw_matrix)  # shape: (T_length, num_kw)
+        
+        # 计算hip、thigh和calf的轨迹增量
+        # hip_increment = torch.sum(sin_kw_matrix * self.kw_hip, dim=1) * self.dt
+        # thigh_increment = torch.sum(cos_kw_matrix * self.kw_thigh, dim=1) * self.dt
+        # calf_increment = torch.sum(cos_kw_matrix * self.kw_calf, dim=1) * self.dt
+
+        hip_increment = torch.sum(cos_kw_matrix * self.kw_hip, dim=1) * self.dt
+        thigh_increment = torch.sum(sin_kw_matrix * self.kw_thigh, dim=1) * self.dt
+        calf_increment = torch.sum(sin_kw_matrix * self.kw_calf, dim=1) * self.dt
+        
+        self.hip_traj = torch.cumsum(hip_increment, dim=0)
+        self.thigh_traj = torch.cumsum(thigh_increment, dim=0)
+        self.calf_traj = torch.cumsum(calf_increment, dim=0)
+
+        self.hip_traj_realpos = torch.zeros(self.num_envs, total_T_num*self.T_length, device=self.device)
+        self.thigh_traj_realpos = torch.zeros(self.num_envs, total_T_num*self.T_length, device=self.device)
+        self.calf_traj_realpos = torch.zeros(self.num_envs, total_T_num*self.T_length, device=self.device)
+        self.hip_traj_realvel = torch.zeros(self.num_envs, total_T_num*self.T_length, device=self.device)
+        self.thigh_traj_realvel = torch.zeros(self.num_envs, total_T_num*self.T_length, device=self.device)
+        self.calf_traj_realvel = torch.zeros(self.num_envs, total_T_num*self.T_length, device=self.device)
+
+    def calibration_train(self):
+        lift_indice = self.commands[:, 4].long()
+        curve_hip_indice = 3 * lift_indice
+        curve_thigh_indice = 3 * lift_indice + 1
+        curve_calf_indice = 3 * lift_indice + 2
+        count_indices = torch.arange(self.num_envs, device=self.device)
+        inv_action_scale = 1/self.cfg.control.action_scale # 为了让PID的target_angle等于预设轨迹
+        self.actions[count_indices, curve_hip_indice] = inv_action_scale* self.hip_traj[(self.episode_length_buf%self.T_length)]
+        self.actions[count_indices, curve_thigh_indice] = inv_action_scale* self.thigh_traj[(self.episode_length_buf%self.T_length)]
+        self.actions[count_indices, curve_calf_indice] = inv_action_scale* self.calf_traj[(self.episode_length_buf%self.T_length)]
+
+    def get_traj_cdn_txt(self):
+        # 获取dof_state_temp数据
+        dof_state_temp = self.gym.acquire_dof_state_tensor(self.sim)
+        dof_state_temp = gymtorch.wrap_tensor(dof_state_temp)  # 确保doft_state_temp是torch tensor
+        dof_state_reshape = dof_state_temp.T.reshape(2, self.num_envs, self.num_dof).permute(1, 2, 0)
+
+        # 计算索引
+        lift_indice = self.commands[:, 4].long()
+        curve_hip_indice = 3 * lift_indice
+        curve_thigh_indice = 3 * lift_indice + 1
+        curve_calf_indice = 3 * lift_indice + 2
+
+        # 更新关节位置和速度
+        self.hip_traj_realpos[:, self.episode_length_buf] = dof_state_reshape[:, curve_hip_indice, 0]
+        self.thigh_traj_realpos[:, self.episode_length_buf] = dof_state_reshape[:, curve_thigh_indice, 0]
+        self.calf_traj_realpos[:, self.episode_length_buf] = dof_state_reshape[:, curve_calf_indice, 0]
+        self.hip_traj_realvel[:, self.episode_length_buf] = dof_state_reshape[:, curve_hip_indice, 1]
+        self.thigh_traj_realvel[:, self.episode_length_buf] = dof_state_reshape[:, curve_thigh_indice, 1]
+        self.calf_traj_realvel[:, self.episode_length_buf] = dof_state_reshape[:, curve_calf_indice, 1]
+
+        if torch.any(self.episode_length_buf > 0 and self.episode_length_buf % (2*self.T_length) == 0):
+            self.freq = 1 / self.dt
+            CCA_start_time = 3 # CCA开始的时刻
+            CCA_start_position = round(CCA_start_time * self.freq)
+            epsilon_b = 0.9
+            zeta_b = 0.015
+            zeta_u = 20
+
+            w_joint_1 = self.hip_traj_realvel.squeeze()
+            w_joint_2 = self.thigh_traj_realvel.squeeze()
+            w_joint_3 = self.calf_traj_realvel.squeeze()
+            theta_joint_1 = self.hip_traj_realpos.squeeze()
+            theta_joint_2 = self.thigh_traj_realpos.squeeze()
+            theta_joint_3 = self.calf_traj_realpos.squeeze()
+            w_effector = torch.stack([
+                - w_joint_1 * torch.cos(theta_joint_2) * torch.sin(theta_joint_3) - w_joint_1 * torch.sin(theta_joint_2) * torch.cos(theta_joint_3),
+                - w_joint_1 * torch.cos(theta_joint_2) * torch.cos(theta_joint_3) + w_joint_1 * torch.sin(theta_joint_2) * torch.sin(theta_joint_3),
+                w_joint_2 + w_joint_3], dim=-1)
+
+            # Compute force matrix (F) for the CCA calculation
+            F = w_effector[CCA_start_position:CCA_start_position + self.T_length, :]
+
+            # Subtract mean from each column
+            Fx = F[:, 0] - F[:, 0].mean()
+            Fy = F[:, 1] - F[:, 1].mean()
+            Fz = F[:, 2] - F[:, 2].mean()
+
+            # Calculate the covariance matrix sigma_ff using PyTorch operations
+            sigma_ff = torch.stack([torch.mean(Fx * Fx), torch.mean(Fx * Fy), torch.mean(Fx * Fz), 
+                                    torch.mean(Fy * Fx), torch.mean(Fy * Fy), torch.mean(Fy * Fz),
+                                    torch.mean(Fz * Fx), torch.mean(Fz * Fy), torch.mean(Fz * Fz)]).view(3, 3)
+
+            # Calculate the condition number using PyTorch
+            cdn_ff = torch.linalg.cond(sigma_ff)
+            print("cdn_ff=", cdn_ff)
+
+            # 定义保存目录
+            directory = os.path.join(
+                LEGGED_GYM_ROOT_DIR, 'logs', 'text'
+            )
+
+            # 创建文件夹（如果不存在）
+            if not os.path.exists(directory):
+                os.makedirs(directory)
+
+            # 定义文件路径
+            now = datetime.now()
+            date_str = now.strftime("%m%d")
+            time_str = now.strftime("%H%M%S")
+            file_name = f"trajectory_data-{date_str}-{time_str}.txt"
+            file_path = os.path.join(directory, file_name)
+
+            # 写入数据到txt文件
+            with open(file_path, 'w') as f:
+                f.write('Condition number=\n')
+                np.savetxt(f, [cdn_ff.cpu().numpy()], fmt='%f', delimiter=',')
+                f.write('sigma_ff=\n')
+                np.savetxt(f, sigma_ff.cpu().numpy(), fmt='%f', delimiter=',')
+                f.write('Hip Trajectory Real Position\n')
+                np.savetxt(f, self.hip_traj_realpos.cpu().numpy(), fmt='%f', delimiter=',')
+                f.write('\nThigh Trajectory Real Position\n')
+                np.savetxt(f, self.thigh_traj_realpos.cpu().numpy(), fmt='%f', delimiter=',')
+                f.write('\nCalf Trajectory Real Position\n')
+                np.savetxt(f, self.calf_traj_realpos.cpu().numpy(), fmt='%f', delimiter=',')
+                f.write('\nHip Trajectory Real Velocity\n')
+                np.savetxt(f, self.hip_traj_realvel.cpu().numpy(), fmt='%f', delimiter=',')
+                f.write('\nThigh Trajectory Real Velocity\n')
+                np.savetxt(f, self.thigh_traj_realvel.cpu().numpy(), fmt='%f', delimiter=',')
+                f.write('\nCalf Trajectory Real Velocity\n')
+                np.savetxt(f, self.calf_traj_realvel.cpu().numpy(), fmt='%f', delimiter=',')
+
+            print(f"Trajectory data saved to {file_path}")
+

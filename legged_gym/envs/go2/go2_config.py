@@ -2,19 +2,19 @@ from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobot
 
 class GO2RoughCfg( LeggedRobotCfg ):
     class init_state( LeggedRobotCfg.init_state ):
-        pos = [0.0, 0.0, 0.42] # x,y,z [m]
+        pos = [0.0, 0.0, 0.4] # x,y,z [m]
         default_joint_angles = { # = target angles [rad] when action = 0.0
-            'FL_hip_joint': 0.1,   # [rad]
+            'FL_hip_joint': 0.1,   # [rad] -0.8~0.8
             'RL_hip_joint': 0.1,   # [rad]
             'FR_hip_joint': -0.1 ,  # [rad]
             'RR_hip_joint': -0.1,   # [rad]
 
-            'FL_thigh_joint': 0.8,     # [rad]
+            'FL_thigh_joint': 0.8,     # [rad] -3.4~1.5
             'RL_thigh_joint': 1.,   # [rad]
             'FR_thigh_joint': 0.8,     # [rad]
             'RR_thigh_joint': 1.,   # [rad]
 
-            'FL_calf_joint': -1.5,   # [rad]
+            'FL_calf_joint': -1.5,   # [rad] -2.7~-0.8
             'RL_calf_joint': -1.5,    # [rad]
             'FR_calf_joint': -1.5,  # [rad]
             'RR_calf_joint': -1.5,    # [rad]

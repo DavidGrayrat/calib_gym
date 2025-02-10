@@ -76,21 +76,21 @@ class LeggedRobotCfg(BaseConfig):
         max_curriculum = 1.
         # num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
         num_commands = 5 # 抬哪一只脚，
-        resampling_time = 6. # time before command are changed[s]
+        resampling_time = 16. # time before command are changed[s]
         heading_command = True # if true: compute ang vel command from heading error
         class ranges:
+            foot_to_lift = [0, 1, 2, 3] # 抬腿指令——0:左前，1:右前，2:左后，3:右后
+            # walk
             # lin_vel_x = [-1.0, 1.0] # min max [m/s]
             # lin_vel_y = [-1.0, 1.0]   # min max [m/s]
             # ang_vel_yaw = [-1, 1]    # min max [rad/s]
             # heading = [-3.14, 3.14]
+            # calibration
             lin_vel_x = [0, 0] # min max [m/s]
             lin_vel_y = [0, 0]   # min max [m/s]
             ang_vel_yaw = [0, 0]    # min max [rad/s]
             heading = [0, 0]
-            # 抬腿奖励
-            # foot_to_lift = [0, 1, 2, 3] # 0:左前，1:右前，2:左后，3:右后
-            foot_to_lift = [0, 1, 2, 3]
-
+            
     class init_state:
         pos = [0.0, 0.0, 1.] # x,y,z [m]
         rot = [0.0, 0.0, 0.0, 1.0] # x,y,z,w [quat]
@@ -106,9 +106,9 @@ class LeggedRobotCfg(BaseConfig):
         stiffness = {'joint_a': 10.0, 'joint_b': 15.}  # [N*m/rad]
         damping = {'joint_a': 1.0, 'joint_b': 1.5}     # [N*m*s/rad]
         # action scale: target angle = actionScale * action + defaultAngle
-        action_scale = 0.5
+        action_scale = 0.5 # original
         # decimation: Number of control action updates @ sim DT per policy DT
-        decimation = 4
+        decimation = 1
 
     class asset:
         file = ""
@@ -143,31 +143,56 @@ class LeggedRobotCfg(BaseConfig):
 
     class rewards: # 在这里加奖励系数，然后去legged_robot.py加奖励函数
         class scales:
-            # termination = -0
+            """ calibration """
             termination = -100
             tracking_lin_vel = 1.0
-            tracking_ang_vel = 0.5
+            tracking_ang_vel = 0.
             lin_vel_z = -2.0
-            ang_vel_xy = -0.05
-            orientation = -0.
+            ang_vel_xy = -0.
+            orientation = -1.0
             torques = -0.00001
             dof_vel = -0.
             dof_acc = -2.5e-7
-            # base_height = -0. 
-            base_height = -0.1
-            # feet_air_time = 1.0
+            base_height = -1.0
             feet_air_time = 0
             collision = -1.
             feet_stumble = -0.0
             action_rate = -0.01
             stand_still = -0.
-            # 抬脚奖励
-            foot_lifted = 0.5
-            # feet_slip = -0.
-            feet_slip = -0.5
-            calf_curve = -0.5
+            feet_slip = -0.5 # 脚滑惩罚
+
+            calf_curve = -0
             calf_move = 0.
 
+            # # go2_stand
+            # ang_vel_all = -0.05 # stand和tripod使用
+            # foot_lifted = 0 # tripod和move
+            # # go2_tripod
+            # ang_vel_all = -0.05 # stand和tripod使用
+            # foot_lifted = 0.5 # tripod和move
+            # go2_move
+            ang_vel_all = -2. # stand和tripod使用
+            foot_lifted = 0.5 # tripod和move
+
+            """ go2_walk """
+            # termination = -0.0
+            # tracking_lin_vel = 1.0
+            # tracking_ang_vel = 0.5
+            # lin_vel_z = -2.0
+            # ang_vel_xy = -0.05
+            # orientation = -0.
+            # torques = -0.00001
+            # dof_vel = -0.
+            # dof_acc = -2.5e-7
+            # base_height = -0. 
+            # feet_air_time =  1.0
+            # collision = -1.
+            # feet_stumble = -0.0 
+            # action_rate = -0.01
+            # stand_still = -0.
+            # feet_slip = -0. # 脚滑惩罚
+            # ang_vel_all = -0. # stand和tripod使用
+            # foot_lifted = 0. # tripod和move
             """
             仅注释与默认奖励项有区别的内容
             
@@ -216,7 +241,7 @@ class LeggedRobotCfg(BaseConfig):
         clip_actions = 100.
 
     class noise:
-        add_noise = False
+        add_noise = False # 是否加噪声
         noise_level = 1.0 # scales other values 
         class noise_scales:
             dof_pos = 0.01

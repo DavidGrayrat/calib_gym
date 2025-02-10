@@ -49,7 +49,8 @@ import torch
 ## debug调试
 
 ## 用cuda1训练：  python train.py --sim_device='cuda:1'
-## 复用： python train.py --resume --experiment_name='rough_go2' --load_run='walk_stair' --checkpoint=1500
+## 复用： python train.py --task=go2 --experiment_name=go2calib_phased --resume  --run_name=stand --load_run= --checkpoint=
+## 新开:  python train.py --task=go2 --experiment_name=go2walk
 
 def train(args):
     env, env_cfg = task_registry.make_env(name=args.task, args=args) ## 创建训练环境,init_buffers, prepare_reward_functions等
