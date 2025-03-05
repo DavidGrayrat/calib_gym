@@ -1,26 +1,21 @@
 # A²I-Calib's Controller #
 This repository based on legged_gym provides a controller that helps Unitree Go2 maintain stability while executing proposed calibration motions of A²I-Calib(submitted to IROS2025). 
 
-**Maintainer**: Nikita Rudin  
-**Affiliation**: Robotic Systems Lab, ETH Zurich  
-**Contact**: rudinn@ethz.ch  
-
----
-
-### :bell: Announcement (09.01.2024) ###
-
-With the shift from Isaac Gym to Isaac Sim at NVIDIA, we have migrated all the environments from this work to [Isaac Lab](https://github.com/isaac-sim/IsaacLab). Following this migration, this repository will receive limited updates and support. We encourage all users to migrate to the new framework for their applications.
-
-Information about this work's locomotion-related tasks in Isaac Lab is available [here](https://isaac-sim.github.io/IsaacLab/source/features/environments.html#locomotion).
+**Maintainer**: Fangyu Jiang  
+**Affiliation**: MSP Group, Shanghai Jiao Tong University  
+**Contact**: jiangfangyu@sjtu.edu.cn  
 
 ---
 
 ### Useful Links ###
 
-Project website: https://leggedrobotics.github.io/legged_gym/   
-Paper: https://arxiv.org/abs/2109.11978
+Project: https://github.com/DavidGrayrat/A2I-Calib   
+Paper: 
 
 ### Installation ###
+0. For any bug
+   - See https://github.com/MSP-xEN/ubuntu20.04
+   - The following is a copy of legged_gym's installation instructions.
 1. Create a new python virtual env with python 3.6, 3.7 or 3.8 (3.8 recommended)
 2. Install pytorch 1.10 with cuda-11.3:
     - `pip3 install torch==1.10.0+cu113 torchvision==0.11.1+cu113 torchaudio==0.10.0+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html`
@@ -35,6 +30,10 @@ Paper: https://arxiv.org/abs/2109.11978
 5. Install legged_gym
     - Clone this repository
    - `cd legged_gym && pip install -e .`
+
+### Simple Changes ###
+1. If you need a new type of robot, you may follow the instructions below.
+2. Mostly you need to modify legged_gym/base/legged_robot_config.py and legged_robot.py to achieve desired goals. Note that some parameters are overridden by legged_gym/go2/go2_config.py(take go2 as an example).
 
 ### CODE STRUCTURE ###
 1. Each environment is defined by an env file (`legged_robot.py`) and a config file (`legged_robot_config.py`). The config file contains two classes: one containing  all the environment parameters (`LeggedRobotCfg`) and one for the training parameters (`LeggedRobotCfgPPo`).  
