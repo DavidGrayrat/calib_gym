@@ -1,6 +1,5 @@
-# Isaac Gym Environments for Legged Robot #
-This repository provides the environment used to train ANYmal (and other robots) to walk on rough terrain using NVIDIA's Isaac Gym.
-It includes all components needed for sim-to-real transfer: actuator network, friction & mass randomization, noisy observations and random pushes during training.  
+# A²I-Calib's Controller #
+This repository based on legged_gym provides a controller that helps Unitree Go2 maintain stability while executing proposed calibration motions of A²I-Calib(submitted to IROS2025). 
 
 **Maintainer**: Nikita Rudin  
 **Affiliation**: Robotic Systems Lab, ETH Zurich  
