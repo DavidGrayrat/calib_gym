@@ -41,16 +41,16 @@ import torch
 # import debugpy
 # try:
 #     # 5678 is the default attach port in the VS Code debug configurations. Unless a host and port are specified, host defaults to 127.0.0.1
-#     debugpy.listen(("localhost", 9501))
+#     debugpy.listen(("localhost", 5678))
 #     print("Waiting for debugger attach")
 #     debugpy.wait_for_client()
 # except Exception as e:
 #     pass
 ## debug调试
 
-## 用cuda1训练：  python train.py --sim_device='cuda:1'
-## 复用： python train.py --task=go2 --experiment_name=go2calib_phased --resume  --run_name=stand --load_run= --checkpoint=
-## 新开:  python train.py --task=go2 --experiment_name=go2walk
+## 复用： python train.py --task=go2 --resume --experiment_name=go2 --run_name=stand --load_run= --checkpoint=
+## 新开:  python train.py --task=go2 --experiment_name=go2 --run_name=tripod
+## 训练数据可视化：tensorboard --logdir=/home/david/calibgym/calib_gym/logs/go2_gazebo/Feb13_17-27-54_stand
 
 def train(args):
     env, env_cfg = task_registry.make_env(name=args.task, args=args) ## 创建训练环境,init_buffers, prepare_reward_functions等

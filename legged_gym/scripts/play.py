@@ -49,7 +49,7 @@ import torch
 #     pass
 ## debug调试
 
-## python play.py --task=go2 --experiment_name=go2calib_phased  --num_envs=8 --run_name=
+## python play.py --task=go2 --num_envs=16 --experiment_name=go2 --run_name=
 
 def play(args):
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
@@ -72,7 +72,7 @@ def play(args):
     
     # export policy as a jit module (used to run it from C++)
     if EXPORT_POLICY:
-        path = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name, 'exported', 'policies')
+        path = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name, 'exported', train_cfg.runner.run_name, 'policies')
         export_policy_as_jit(ppo_runner.alg.actor_critic, path)
         print('Exported policy as jit script to: ', path)
 

@@ -76,10 +76,10 @@ class LeggedRobotCfg(BaseConfig):
         max_curriculum = 1.
         # num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
         num_commands = 5 # 抬哪一只脚，
-        resampling_time = 16. # time before command are changed[s]
+        resampling_time = 17. # time before command are changed[s]
         heading_command = True # if true: compute ang vel command from heading error
         class ranges:
-            foot_to_lift = [0, 1, 2, 3] # 抬腿指令——0:左前，1:右前，2:左后，3:右后
+            foot_to_lift = [0, 1, 2, 3, 4] # 抬腿指令——0:左前，1:右前，2:左后，3:右后
             # walk
             # lin_vel_x = [-1.0, 1.0] # min max [m/s]
             # lin_vel_y = [-1.0, 1.0]   # min max [m/s]
@@ -153,24 +153,27 @@ class LeggedRobotCfg(BaseConfig):
             torques = -0.00001
             dof_vel = -0.
             dof_acc = -2.5e-7
-            base_height = -1.0
+            # base_height = -1.0 # original
+            base_height = -10.0
+
             feet_air_time = 0
             collision = -1.
             feet_stumble = -0.0
             action_rate = -0.01
             stand_still = -0.
-            feet_slip = -0.5 # 脚滑惩罚
+            # hip_penalization = -0.1
+            # feet_slip = -0.5 # 脚滑惩罚
+            feet_slip = -0.1 # 脚滑惩罚
 
-            calf_curve = -0
-            calf_move = 0.
-
-            # # go2_stand
+            '''关闭轨迹跟踪和条件数计算'''
+            # # go2_stand 
             # ang_vel_all = -0.05 # stand和tripod使用
             # foot_lifted = 0 # tripod和move
-            # # go2_tripod
+            # go2_tripod
             # ang_vel_all = -0.05 # stand和tripod使用
             # foot_lifted = 0.5 # tripod和move
-            # go2_move
+            '''启动轨迹跟踪'''
+            # # go2_move
             ang_vel_all = -2. # stand和tripod使用
             foot_lifted = 0.5 # tripod和move
 

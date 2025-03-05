@@ -96,7 +96,7 @@ class LeggedRobot(BaseTask):
             if self.device == 'cpu':
                 self.gym.fetch_results(self.sim, True)
             self.gym.refresh_dof_state_tensor(self.sim) # 更新self.dof_state，包括关节角和关节角速度，1024(num_envs)*12(num_dof)
-        self.get_traj_cdn_txt()
+        # self.get_traj_cdn_txt()
         self.post_physics_step()
 
         # return clipped obs, clipped states (None), rewards, dones and infos
@@ -362,7 +362,7 @@ class LeggedRobot(BaseTask):
 
         # set small commands to zero
         self.commands[env_ids, :2] *= (torch.norm(self.commands[env_ids, :2], dim=1) > 0.2).unsqueeze(1)
-        self.commands[env_ids, 4] = torch.randint(self.command_ranges["foot_to_lift"][0], self.command_ranges["foot_to_lift"][3]+1, (len(env_ids),), device=self.device).float()
+        self.commands[env_ids, 4] = torch.randint(self.command_ranges["foot_to_lift"][0], self.command_ranges["foot_to_lift"][-1]+1, (len(env_ids),), device=self.device).float()
 
     def _compute_torques(self, actions): # action是给定PD控制器的关节位置或者速度，要看是P控制还是V控制，默认是位置控制
         """ Compute torques from actions.
@@ -396,7 +396,8 @@ class LeggedRobot(BaseTask):
         Args:
             env_ids (List[int]): Environemnt ids
         """
-        self.dof_pos[env_ids] = self.default_dof_pos * torch_rand_float(0.5, 1.5, (len(env_ids), self.num_dof), device=self.device)
+        self.dof_pos[env_ids] = self.default_dof_pos * torch_rand_float(0.7, 1.3, (len(env_ids), self.num_dof), device=self.device) # original
+        # self.dof_pos[env_ids] = self.default_dof_pos
         self.dof_vel[env_ids] = 0.
 
         env_ids_int32 = env_ids.to(dtype=torch.int32)
@@ -676,6 +677,7 @@ class LeggedRobot(BaseTask):
         self.num_bodies = len(body_names)
         self.num_dofs = len(self.dof_names)
         feet_names = [s for s in body_names if self.cfg.asset.foot_name in s]
+        hip_names = ["FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint"]
         penalized_contact_names = []
         for name in self.cfg.asset.penalize_contacts_on:
             penalized_contact_names.extend([s for s in body_names if name in s])
@@ -714,6 +716,9 @@ class LeggedRobot(BaseTask):
         self.feet_indices = torch.zeros(len(feet_names), dtype=torch.long, device=self.device, requires_grad=False)
         for i in range(len(feet_names)):
             self.feet_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], feet_names[i])
+        self.hip_indices = torch.zeros(len(hip_names), dtype=torch.long, device=self.device, requires_grad=False)
+        for i, name in enumerate(hip_names):
+            self.hip_indices[i] = self.dof_names.index(name)
 
         self.penalised_contact_indices = torch.zeros(len(penalized_contact_names), dtype=torch.long, device=self.device, requires_grad=False)
         for i in range(len(penalized_contact_names)):
@@ -857,6 +862,7 @@ class LeggedRobot(BaseTask):
     def _reward_base_height(self):
         # Penalize base height away from target
         base_height = torch.mean(self.root_states[:, 2].unsqueeze(1) - self.measured_heights, dim=1)
+        # print(base_height)
         return torch.square(base_height - self.cfg.rewards.base_height_target)
     
     def _reward_torques(self):
@@ -936,18 +942,23 @@ class LeggedRobot(BaseTask):
         # penalize high contact forces
         return torch.sum((torch.norm(self.contact_forces[:, self.feet_indices, :], dim=-1) -  self.cfg.rewards.max_contact_force).clip(min=0.), dim=1)
 
+    def _reward_hip_penalization(self): # 当前关节角与默认关节角差的绝对值
+        # Penalize hip movement
+        return torch.sum(torch.abs(self.dof_pos[:, self.hip_indices] - self.default_dof_pos[:, self.hip_indices]), dim=1)
+
     def _reward_foot_lifted(self): # 该抬的奖励，不该抬的惩罚
         contact = self.contact_forces[:, self.feet_indices, 2] > 1.
         lift_indice = self.commands[:, 4].long()
-        contact_lift = torch.gather(contact, 1, lift_indice.view(-1, 1))
-        last_contact_lift = torch.gather(self.last_contacts, 1, lift_indice.view(-1, 1))
-        contact_filt = torch.logical_or(contact_lift, last_contact_lift)
-        # contact_filt = torch.logical_or(contact[:, self.commands[:, 4].long()], self.last_contacts[:, self.commands[:, 4].long()]) 
-        # contact_filt = torch.logical_or(contact, self.last_contacts) 
         self.last_contacts = contact
-        to_lift = torch.zeros_like(contact_filt)
-        # to_lift[:, self.commands[:, 4].long()] = False
-        at_command = torch.logical_not(torch.logical_xor(contact_filt, to_lift))
+        mask = (lift_indice==4).squeeze()
+        contact_lift = torch.zeros_like(lift_indice, dtype=torch.bool)
+        last_contacts_lift = torch.zeros_like(lift_indice, dtype=torch.bool)
+        contact_lift[mask] = torch.logical_not(contact[mask].all(dim=1))
+        last_contacts_lift[mask] = torch.logical_not(self.last_contacts[mask].all(dim=1))
+        contact_lift[~mask] = contact[~mask].gather(1, lift_indice[~mask].unsqueeze(1)).squeeze()
+        last_contacts_lift[~mask] = self.last_contacts[~mask].gather(1, lift_indice[~mask].unsqueeze(1)).squeeze()
+        contact_filt = torch.logical_or(contact_lift, last_contacts_lift)
+        at_command = torch.logical_not(contact_filt)
         rew_lift = torch.where(at_command, torch.tensor(1, device=self.device), torch.tensor(-1, device=self.device)).squeeze()
         # at_command_compute = at_command[:, [0, 3]]
         # rew_lift = (contact_filt.numel() - torch.sum(contact_filt))/(contact_filt.shape[0]*contact_filt.shape[1])
@@ -964,11 +975,17 @@ class LeggedRobot(BaseTask):
         self.last_contacts = contact
         lift_indice = self.commands[:, 4].long()
         foot_velocities = torch.square(torch.norm(self.foot_velocities[:, :, 0:2], dim=2).view(self.num_envs, -1))
-        slip_feet = contact_filt * foot_velocities
-        all_indices = torch.arange(slip_feet.size(1), device=self.device).repeat(slip_feet.size(0), 1)
-        mask = all_indices != lift_indice.view(-1, 1)
-        sliped_feet = slip_feet.masked_select(mask).view(slip_feet.size(0), -1)
-        rew_slip = torch.sum(sliped_feet, dim=1)
+        # slip_feet = contact_filt * foot_velocities
+        # all_indices = torch.arange(slip_feet.size(1), device=self.device).repeat(slip_feet.size(0), 1)
+        # mask = all_indices != lift_indice.view(-1, 1)
+        # sliped_feet = slip_feet.masked_select(mask).view(slip_feet.size(0), -1)
+        # rew_slip = torch.sum(sliped_feet, dim=1)
+
+        mask_4 = (lift_indice == 4).squeeze()
+        vel_sum = foot_velocities.sum(dim=1)
+        rew_slip = torch.zeros_like(lift_indice).float()
+        rew_slip[mask_4] = vel_sum[mask_4]
+        rew_slip[~mask_4] = vel_sum[~mask_4] - (foot_velocities[~mask_4].gather(1, lift_indice[~mask_4].unsqueeze(1))).squeeze()
         return rew_slip
 
     def _reward_calf_curve(self):
@@ -1003,28 +1020,34 @@ class LeggedRobot(BaseTask):
         self.omega = np.pi * 0.25 / self.shift_range
 
         # 动作cdn=1
-        # self.num_kw = 10
-        # self.kw_arange = torch.arange(1, self.num_kw + 1, device=self.device)
-        # self.kw_hip = torch.tensor(
-        #     [-0.092175204, 0.055156594, 0.228888365, 0.200556885, 0.350061213, 0.672317906, 
-        #     0.394845532, -0.482850929, -0.859851211, -0.419951884], device=self.device
-        # )
-        # self.kw_thigh = torch.tensor(
+        self.num_kw = 10
+        self.kw_arange = torch.arange(1, self.num_kw + 1, device=self.device)
+        thigh_calf_factor = 1
+        self.kw_hip = torch.tensor(
+            [-0.092175204, 0.055156594, 0.228888365, 0.200556885, 0.350061213, 0.672317906, 
+            0.394845532, -0.482850929, -0.859851211, -0.419951884], device=self.device
+        )
+        self.kw_thigh = thigh_calf_factor * torch.tensor(
+            [0.680682733, 0.296941315, 0.263194088, 0.381940112, 0.293745207, 0.151310506, 
+            0.210632043, 0.212464916, -0.014183956, 0.151397236], device=self.device
+        )
+        # self.kw_calf = (1-thigh_calf_factor) * torch.tensor(
         #     [0.680682733, 0.296941315, 0.263194088, 0.381940112, 0.293745207, 0.151310506, 
         #     0.210632043, 0.212464916, -0.014183956, 0.151397236], device=self.device
         # )
-        # self.kw_calf = torch.zeros(self.num_kw, device=self.device)
+        self.kw_calf = torch.zeros(self.num_kw, device=self.device)
+
 
         # 动作cdn=1但幅度更小，记得改sin cos顺序
-        self.num_kw = 3
-        self.kw_arange = torch.arange(1, self.num_kw + 1, device=self.device)
-        self.kw_hip = torch.tensor(
-            [-0.061545,-0.01863,1.4404], device=self.device
-        )
-        self.kw_thigh = torch.tensor(
-            [-0.89714,0.049513,0.44911], device=self.device
-        )
-        self.kw_calf = torch.zeros(self.num_kw, device=self.device)
+        # self.num_kw = 3
+        # self.kw_arange = torch.arange(1, self.num_kw + 1, device=self.device)
+        # self.kw_hip = torch.tensor(
+        #     [-0.061545,-0.01863,1.4404], device=self.device
+        # )
+        # self.kw_thigh = torch.tensor(
+        #     [-0.89714,0.049513,0.44911], device=self.device
+        # )
+        # self.kw_calf = torch.zeros(self.num_kw, device=self.device)
         
         # 随便抬抬腿，晃一晃
         # self.num_kw = 1 
@@ -1044,17 +1067,23 @@ class LeggedRobot(BaseTask):
         cos_kw_matrix = torch.cos(kw_matrix)  # shape: (T_length, num_kw)
         
         # 计算hip、thigh和calf的轨迹增量
-        # hip_increment = torch.sum(sin_kw_matrix * self.kw_hip, dim=1) * self.dt
-        # thigh_increment = torch.sum(cos_kw_matrix * self.kw_thigh, dim=1) * self.dt
-        # calf_increment = torch.sum(cos_kw_matrix * self.kw_calf, dim=1) * self.dt
+        hip_increment = torch.sum(sin_kw_matrix * self.kw_hip, dim=1) * self.dt
+        thigh_increment = torch.sum(cos_kw_matrix * self.kw_thigh, dim=1) * self.dt
+        calf_increment = torch.sum(cos_kw_matrix * self.kw_calf, dim=1) * self.dt
 
-        hip_increment = torch.sum(cos_kw_matrix * self.kw_hip, dim=1) * self.dt
-        thigh_increment = torch.sum(sin_kw_matrix * self.kw_thigh, dim=1) * self.dt
-        calf_increment = torch.sum(sin_kw_matrix * self.kw_calf, dim=1) * self.dt
+        # hip_increment = torch.sum(cos_kw_matrix * self.kw_hip, dim=1) * self.dt
+        # thigh_increment = torch.sum(sin_kw_matrix * self.kw_thigh, dim=1) * self.dt
+        # calf_increment = torch.sum(sin_kw_matrix * self.kw_calf, dim=1) * self.dt
         
         self.hip_traj = torch.cumsum(hip_increment, dim=0)
         self.thigh_traj = torch.cumsum(thigh_increment, dim=0)
         self.calf_traj = torch.cumsum(calf_increment, dim=0)
+        noise_add = False
+        noise_add_scale = 0.2
+        if noise_add:
+            self.hip_traj += (2 * torch.rand_like(self.hip_traj) - 1) * noise_add_scale
+            self.thigh_traj += (2 * torch.rand_like(self.thigh_traj) - 1) * noise_add_scale
+            self.calf_traj += (2 * torch.rand_like(self.calf_traj) - 1) * noise_add_scale
 
         self.hip_traj_realpos = torch.zeros(self.num_envs, total_T_num*self.T_length, device=self.device)
         self.thigh_traj_realpos = torch.zeros(self.num_envs, total_T_num*self.T_length, device=self.device)
@@ -1065,14 +1094,22 @@ class LeggedRobot(BaseTask):
 
     def calibration_train(self):
         lift_indice = self.commands[:, 4].long()
+        mask_4 = (lift_indice == 4).squeeze()
+        # vel_sum = foot_velocities.sum(dim=1)
+        # rew_slip = torch.zeros_like(lift_indice).float()
+        # rew_slip[mask_4] = vel_sum[mask_4]
+        # rew_slip[~mask_4] = vel_sum[~mask_4] - (foot_velocities[~mask_4].gather(1, lift_indice[~mask_4].unsqueeze(1))).squeeze()
+        # curve_hip_indice = torch.zeros_like(lift_indice)
+        # curve_thigh_indice = torch.zeros_like(lift_indice)
+        # curve_calf_indice = torch.zeros_like(lift_indice)
         curve_hip_indice = 3 * lift_indice
         curve_thigh_indice = 3 * lift_indice + 1
         curve_calf_indice = 3 * lift_indice + 2
         count_indices = torch.arange(self.num_envs, device=self.device)
         inv_action_scale = 1/self.cfg.control.action_scale # 为了让PID的target_angle等于预设轨迹
-        self.actions[count_indices, curve_hip_indice] = inv_action_scale* self.hip_traj[(self.episode_length_buf%self.T_length)]
-        self.actions[count_indices, curve_thigh_indice] = inv_action_scale* self.thigh_traj[(self.episode_length_buf%self.T_length)]
-        self.actions[count_indices, curve_calf_indice] = inv_action_scale* self.calf_traj[(self.episode_length_buf%self.T_length)]
+        self.actions[count_indices[~mask_4], curve_hip_indice[~mask_4]] = inv_action_scale* self.hip_traj[(self.episode_length_buf[~mask_4]%self.T_length)]
+        self.actions[count_indices[~mask_4], curve_thigh_indice[~mask_4]] = inv_action_scale* self.thigh_traj[(self.episode_length_buf[~mask_4]%self.T_length)]
+        self.actions[count_indices[~mask_4], curve_calf_indice[~mask_4]] = inv_action_scale* self.calf_traj[(self.episode_length_buf[~mask_4]%self.T_length)]
 
     def get_traj_cdn_txt(self):
         # 获取dof_state_temp数据
@@ -1109,8 +1146,8 @@ class LeggedRobot(BaseTask):
             theta_joint_2 = self.thigh_traj_realpos.squeeze()
             theta_joint_3 = self.calf_traj_realpos.squeeze()
             w_effector = torch.stack([
-                - w_joint_1 * torch.cos(theta_joint_2) * torch.sin(theta_joint_3) - w_joint_1 * torch.sin(theta_joint_2) * torch.cos(theta_joint_3),
-                - w_joint_1 * torch.cos(theta_joint_2) * torch.cos(theta_joint_3) + w_joint_1 * torch.sin(theta_joint_2) * torch.sin(theta_joint_3),
+                w_joint_1 * torch.cos(theta_joint_2) * torch.sin(theta_joint_3) + w_joint_1 * torch.sin(theta_joint_2) * torch.cos(theta_joint_3),
+                w_joint_1 * torch.cos(theta_joint_2) * torch.cos(theta_joint_3) - w_joint_1 * torch.sin(theta_joint_2) * torch.sin(theta_joint_3),
                 w_joint_2 + w_joint_3], dim=-1)
 
             # Compute force matrix (F) for the CCA calculation
